@@ -42,14 +42,17 @@ class ArtifactRegistryBundler(DockerBundler):
     @classmethod
     def default_config(cls):
         cfg = super().default_config()
+        #cfg.region = aws_settings("region", required=False)
         cfg.repo = aws_settings("docker_repo", required=False)
         cfg.dockerfile = aws_settings("default_dockerfile", required=False)
         return cfg
 
     def _build_and_push(self, *args, **kwargs):
         cfg = self.config
+        print(cfg)
+        exit()
         subprocess.run(
-            ["gcloud", "auth", "configure-docker", registry_from_repo(cfg.repo)],
+            ["aws", "ecr", "get-login-password", "--region", "", "|docker", "login", "--username", "AWS", "--password-stdin", registry_from_repo(cfg.repo)],
             check=True,
         )
         return super()._build_and_push(*args, **kwargs)
