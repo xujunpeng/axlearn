@@ -45,9 +45,14 @@ def main(**kwargs):
     # Register default command groups, depending on which extras the user has installed.
     # Do this in __main__ to avoid registering on import.
     try:
+        """
         from axlearn.cli.gcp import add_cmd_group
 
         register_root_command_group(add_cmd_group, name="gcp")
+        """
+        from axlearn.cli.aws import add_cmd_group
+
+        register_root_command_group(add_cmd_group, name="aws")
     except (ImportError, ModuleNotFoundError):
         # GCP extras not installed.
         pass
