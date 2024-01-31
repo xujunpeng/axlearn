@@ -28,7 +28,33 @@ from axlearn.cloud.common.bundler import main as bundler_main
 from axlearn.cloud.common.bundler import main_flags as bundler_main_flags
 from axlearn.cloud.common.bundler import register_bundler
 from axlearn.cloud.common.docker import registry_from_repo
-from axlearn.cloud.aws.config import gcp_settings
+from axlearn.cloud.aws.config import aws_settings
 from axlearn.cloud.aws.utils import common_flags
 
+FLAGS = flags.FLAGS
 
+@register_bundler
+class ArtifactRegistryBundler(DockerBundler):
+    """A DockerBundler that reads configs from aws_settings, and auths to Elastic Container Registry."""
+
+    TYPE = "containerregistry"
+
+    @classmethod
+    def default_config(cls):
+        cfg = super().default_config()
+        cfg.repo = aws_settings("docker_repo", required=False)
+        cfg.dockerfile = aws_settings("default_dockerfile", required=False)
+        return cfg
+
+    def _build_and_push(self, *args, **kwargs):
+        cfg = self.config
+        subprocess.run(
+            ["gcloud", "auth", "configure-docker", registry_from_repo(cfg.repo)],
+            check=True,
+        )
+        return super()._build_and_push(*args, **kwargs)
+
+if __name__ == "__main__":
+    common_flags()
+    bundler_main_flags()
+    app.run(bundler_main)
