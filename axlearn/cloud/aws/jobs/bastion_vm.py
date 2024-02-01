@@ -471,7 +471,7 @@ def main(argv: Sequence[str], *, flag_values: flags.FlagValues = FLAGS):
         cfg = CreateBastionJob.from_flags(flag_values).set(
             bundler=bundler_cfg.set(
                 image=bundler_cfg.image or "base",
-                repo=bundler_cfg.repo or gcp_settings("docker_repo", required=False),
+                repo=bundler_cfg.repo or aws_settings("docker_repo", required=False),
                 dockerfile=(
                     bundler_cfg.dockerfile or gcp_settings("default_dockerfile", required=False)
                 ),
@@ -556,4 +556,5 @@ if __name__ == "__main__":
     _private_flags()
     configure_logging(logging.INFO)
     print("here")
+    exit()
     app.run(main)
