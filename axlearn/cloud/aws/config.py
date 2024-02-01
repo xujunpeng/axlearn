@@ -93,6 +93,7 @@ def aws_settings(
     # defaulted.
     print("2", project_configs)
     value = project_configs.get(key, default)
+    print(value)
     if required and value is None:
         logging.error("Could not find key %s in settings.", key)
         logging.error(
