@@ -45,6 +45,11 @@ def add_cmd_group(*, parent: CommandGroup):
         module="axlearn.cloud.aws.bundler",
         help="Bundle the local directory",
     )
+    aws_cmd.add_cmd_from_module(
+        "bastion",
+        module="axlearn.cloud.aws.jobs.bastion_vm",
+        help="Launch jobs through Bastion orchestrator",
+    )
 
     """
     # Interact with compute.
@@ -69,11 +74,6 @@ def add_cmd_group(*, parent: CommandGroup):
         "vm",
         module="axlearn.cloud.aws.jobs.cpu_runner",
         help="Create a VM and execute the given command on it",
-    )
-    aws_cmd.add_cmd_from_module(
-        "bastion",
-        module="axlearn.cloud.aws.jobs.bastion_vm",
-        help="Launch jobs through Bastion orchestrator",
     )
     aws_cmd.add_cmd_from_module(
         "dataflow",

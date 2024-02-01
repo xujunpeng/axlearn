@@ -19,9 +19,9 @@ from axlearn.cloud.gcp.scopes import DEFAULT_APPLICATION
 
 
 def common_flags(**kwargs):
-    """Defines common GCP flags. Keyword args will be forwarded to flag definitions."""
-    flags.DEFINE_string("project", None, "The GCP project name.", **kwargs)
-    flags.DEFINE_string("zone", None, "The GCP zone name.", **kwargs)
+    """Defines common AWS flags. Keyword args will be forwarded to flag definitions."""
+    flags.DEFINE_string("project", None, "The AWS project name.", **kwargs)
+    flags.DEFINE_string("region", None, "The AWS region name.", **kwargs)
 
 
 def get_credentials(
@@ -29,7 +29,7 @@ def get_credentials(
     impersonate_account: Optional[str] = None,
     impersonate_scopes: Optional[Sequence[str]] = None,
 ) -> Credentials:
-    """Get gcloud credentials, or exits if unauthenticated.
+    """Get aws credentials, or exits if unauthenticated.
 
     Args:
         impersonate_account: Service account to impersonate, if not None.
