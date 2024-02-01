@@ -34,57 +34,6 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 RUN pip install flit
 RUN pip install --upgrade pip
 
-################################################################################
-# CI container spec.                                                           #
-################################################################################
-
-# Leverage multi-stage build for unit tests.
-FROM base as ci
-
-# TODO(markblee): Remove gcp,vertexai_tensorboard from CI.
-RUN pip install .[dev,gcp,vertexai_tensorboard]
-COPY . .
-
-# Defaults to an empty string, i.e. run pytest against all files.
-ARG PYTEST_FILES=''
-# `exit 1` fails the build.
-RUN ./run_tests.sh "${PYTEST_FILES}"
-
-################################################################################
-# Bastion container spec.                                                      #
-################################################################################
-
-FROM base AS bastion
-
-# TODO(markblee): Consider copying large directories separately, to cache more aggressively.
-# TODO(markblee): Is there a way to skip the "production" deps?
-COPY . /root/
-RUN pip install .[gcp,vertexai_tensorboard]
-
-################################################################################
-# Dataflow container spec.                                                     #
-################################################################################
-
-FROM base AS dataflow
-
-# Beam workers default to creating a new virtual environment on startup. Instead, we want them to
-# pickup the venv setup above. An alternative is to install into the global environment.
-ENV RUN_PYTHON_SDK_IN_DEFAULT_ENVIRONMENT=1
-RUN pip install .[gcp,dataflow]
-COPY . .
-
-################################################################################
-# TPU container spec.                                                          #
-################################################################################
-
-FROM base AS tpu
-
-# TODO(markblee): Support extras.
-ENV PIP_FIND_LINKS=https://storage.googleapis.com/jax-releases/libtpu_releases.html
-# Ensure we install the TPU version, even if building locally.
-# Jax will fallback to CPU when run on a machine without TPU.
-RUN pip install .[tpu]
-COPY . .
 
 ################################################################################
 # Final target spec.                                                           #
