@@ -53,6 +53,7 @@ class ArtifactRegistryBundler(DockerBundler):
 
         subprocess.run(cmd,
             check=True,
+            shell=True
         )
         exit()
         return super()._build_and_push(*args, **kwargs)
