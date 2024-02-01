@@ -34,6 +34,33 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 RUN pip install flit
 RUN pip install --upgrade pip
 
+################################################################################
+# CI container spec.                                                           #
+################################################################################
+
+# Leverage multi-stage build for unit tests.
+FROM base as ci
+
+# TODO(markblee): Remove gcp,vertexai_tensorboard from CI.
+RUN pip install .[dev,gcp,vertexai_tensorboard]
+COPY . .
+
+# Defaults to an empty string, i.e. run pytest against all files.
+ARG PYTEST_FILES=''
+# `exit 1` fails the build.
+RUN ./run_tests.sh "${PYTEST_FILES}"
+
+################################################################################
+# Bastion container spec.                                                      #
+################################################################################
+
+FROM base AS bastion
+
+# TODO(markblee): Consider copying large directories separately, to cache more aggressively.
+# TODO(markblee): Is there a way to skip the "production" deps?
+COPY . /root/
+RUN pip install .[gcp,vertexai_tensorboard]
+
 
 ################################################################################
 # Final target spec.                                                           #
