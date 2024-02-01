@@ -45,7 +45,7 @@ class ArtifactRegistryBundler(DockerBundler):
         cfg.region = aws_settings("aws_region", required=False)
         cfg.repo = aws_settings("docker_repo", required=False)
         cfg.dockerfile = aws_settings("default_dockerfile", required=False)
-        print(cfg)
+        print("1", cfg)
         return cfg
 
     def _build_and_push(self, *args, **kwargs):

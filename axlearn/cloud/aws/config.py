@@ -91,7 +91,7 @@ def aws_settings(
 
     # Only set the default value if the field is omitted. Explicitly falsey values should not be
     # defaulted.
-    print(project_configs)
+    print("2", project_configs)
     value = project_configs.get(key, default)
     if required and value is None:
         logging.error("Could not find key %s in settings.", key)
