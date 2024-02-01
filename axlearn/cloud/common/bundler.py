@@ -392,6 +392,8 @@ class DockerBundler(BaseDockerBundler):
         labels: Dict[str, str],
     ) -> str:
         cfg = self.config
+        print(image)
+        exit()
         return docker_push(
             docker_build(
                 dockerfile=dockerfile,
