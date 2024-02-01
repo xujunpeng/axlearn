@@ -554,7 +554,6 @@ def main(argv: Sequence[str], *, flag_values: flags.FlagValues = FLAGS):
 
 if __name__ == "__main__":
     _private_flags()
-    print("here")
-    exit()
     configure_logging(logging.INFO)
+    print("here")
     app.run(main)
