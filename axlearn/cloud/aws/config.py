@@ -91,7 +91,6 @@ def aws_settings(
 
     # Only set the default value if the field is omitted. Explicitly falsey values should not be
     # defaulted.
-    print("2", project_configs)
     value = project_configs.get(key, default)
     print(value)
     if required and value is None:

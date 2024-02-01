@@ -42,21 +42,17 @@ class ArtifactRegistryBundler(DockerBundler):
     @classmethod
     def default_config(cls):
         cfg = super().default_config()
-        cfg.region = aws_settings("aws_region", required=False)
-        print("1", cfg)
-        exit()
         cfg.repo = aws_settings("docker_repo", required=False)
         cfg.dockerfile = aws_settings("default_dockerfile", required=False)
         return cfg
 
     def _build_and_push(self, *args, **kwargs):
         cfg = self.config
-        print(cfg)
-        exit()
         subprocess.run(
-            ["aws", "ecr", "get-login-password", "--region", "", "|docker", "login", "--username", "AWS", "--password-stdin", registry_from_repo(cfg.repo)],
+            ["aws", "ecr", "get-login-password", "--region", "us-west-2", "|docker", "login", "--username", "AWS", "--password-stdin", registry_from_repo(cfg.repo)],
             check=True,
         )
+        exit()
         return super()._build_and_push(*args, **kwargs)
 
 if __name__ == "__main__":
