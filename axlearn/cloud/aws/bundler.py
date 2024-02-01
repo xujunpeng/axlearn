@@ -48,8 +48,10 @@ class ArtifactRegistryBundler(DockerBundler):
 
     def _build_and_push(self, *args, **kwargs):
         cfg = self.config
-        subprocess.run(
-            ["aws", "ecr", "get-login-password", "--region", "us-west-2", "|docker", "login", "--username", "AWS", "--password-stdin", registry_from_repo(cfg.repo)],
+
+        cmd = 'aws ecr get-login-password --region us-west-2 | docker login --username "AWS" --password-stdin 637423567719.dkr.ecr.us-west-2.amazonaws.com'
+
+        subprocess.run(cmd,
             check=True,
         )
         exit()
