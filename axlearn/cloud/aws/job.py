@@ -19,16 +19,16 @@ from axlearn.cloud.common.job import Job
 from axlearn.cloud.common.utils import subprocess_run
 #from axlearn.cloud.gcp.scopes import DEFAULT_TPU_SCOPES
 #from axlearn.cloud.gcp.tpu import _qrm_resource, _tpu_resource, get_queued_tpu_node, get_tpu_node
-from axlearn.cloud.gcp.utils import get_credentials, running_from_vm
+from axlearn.cloud.aws.utils import get_credentials, running_from_vm
 from axlearn.common.config import REQUIRED, Required, config_class
 
 
-class GCPJob(Job):
-    """Base GCP Job definition."""
+class AWSJob(Job):
+    """Base AWS Job definition."""
 
     @config_class
     class Config(Job.Config):
-        """Configures GCPJob."""
+        """Configures AWSJob."""
 
         # GCP project.
         project: Required[str] = REQUIRED
@@ -47,7 +47,6 @@ class GCPJob(Job):
 
         Args:
             impersonate_scopes: Scopes of the impersonation token,
-                following https://developers.google.com/identity/protocols/oauth2/scopes
 
         Returns:
             The temporary credentials, possibly impersonating `cfg.service_account`.
@@ -57,11 +56,11 @@ class GCPJob(Job):
         )
 
 
-class TPUJob(GCPJob):
+class TPUJob(AWSJob):
     """Executes arbitrary commands on TPU-VMs."""
 
     @config_class
-    class Config(GCPJob.Config):
+    class Config(AWSJob.Config):
         """Configures TPUJob."""
 
         tpu_type: Required[str] = REQUIRED
@@ -191,10 +190,10 @@ class TPUJob(GCPJob):
         return super().execute()
 
 
-class CPUJob(GCPJob):
+class CPUJob(AWSJob):
     """Executes arbitrary commands on CPU VMs."""
 
-    Config = GCPJob.Config
+    Config = AWSJob.Config
 
     def _execute_remote_cmd(
         self, cmd: str, *, detached_session: Optional[str] = None, **kwargs
@@ -231,6 +230,7 @@ class CPUJob(GCPJob):
 
     def _execute(self) -> Any:
         """Performs some computation on remote VMs."""
+        print("running from here")
         cfg: CPUJob.Config = self.config
         self._execute_remote_cmd(cfg.command)
 

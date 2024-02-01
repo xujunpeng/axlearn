@@ -9,6 +9,8 @@ import sys
 from typing import Optional, Sequence
 
 import google.auth
+import boto3
+from botocore.exceptions import NoCredentialsError
 from absl import flags, logging
 from google.auth import exceptions as gauthexceptions
 from google.auth import impersonated_credentials
@@ -21,7 +23,7 @@ from axlearn.cloud.gcp.scopes import DEFAULT_APPLICATION
 def common_flags(**kwargs):
     """Defines common AWS flags. Keyword args will be forwarded to flag definitions."""
     flags.DEFINE_string("project", None, "The AWS project name.", **kwargs)
-    flags.DEFINE_string("region", None, "The AWS region name.", **kwargs)
+    flags.DEFINE_string("zone", None, "The AWS region name.", **kwargs)
 
 
 def get_credentials(
@@ -34,28 +36,28 @@ def get_credentials(
     Args:
         impersonate_account: Service account to impersonate, if not None.
         impersonate_scopes: Scopes of the impersonation token,
-            following https://developers.google.com/identity/protocols/oauth2/scopes.
 
     Returns:
         An authorized set of credentials.
     """
 
     try:
-        credentials, project_id = google.auth.default()
-        logging.log_first_n(logging.INFO, "Using credential for project_id=%s", 1, project_id)
-    except (gauthexceptions.RefreshError, gauthexceptions.DefaultCredentialsError):
-        logging.error("Please run '%s gcp auth' before this script.", infer_cli_name())
-        logging.error("Please also verify if default project id is correct.")
-        sys.exit(1)
+        # Retrieve AWS credentials
+        session = boto3.Session()
+        credentials = session.get_credentials()
+    except NoCredentialsError:
+        logging.error("Failed to retrieve AWS credentials. Please ensure AWS CLI is properly configured.")
+        exit(1)
 
+    # Optionally, assume a role if impersonate_account is provided
     if impersonate_account:
-        credentials = impersonated_credentials.Credentials(
-            source_credentials=credentials,
-            target_principal=impersonate_account,
-            # If no scope provided, use the same scopes provided by
-            # `gcloud auth application-default login`.
-            target_scopes=impersonate_scopes or DEFAULT_APPLICATION,
+        sts_client = session.client('sts')
+        assumed_role = sts_client.assume_role(
+            RoleArn=impersonate_account,
+            RoleSessionName='AssumedRoleSession',
+            DurationSeconds=3600,  # Adjust as needed
         )
+        credentials = assumed_role['Credentials']
 
     return credentials
 

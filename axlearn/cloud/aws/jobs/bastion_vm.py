@@ -130,10 +130,10 @@ from axlearn.cloud.common.scheduler import JobScheduler
 from axlearn.cloud.common.uploader import Uploader, with_interval
 from axlearn.cloud.common.utils import configure_logging, infer_cli_name, parse_action
 from axlearn.cloud.aws.config import aws_settings
-from axlearn.cloud.gcp.job import CPUJob, docker_command
+from axlearn.cloud.aws.job import CPUJob, docker_command
 from axlearn.cloud.gcp.tpu_cleaner import TPUCleaner
 from axlearn.cloud.aws.utils import catch_auth, common_flags, get_credentials
-from axlearn.cloud.gcp.vm import _compute_resource, create_vm, delete_vm, get_vm_node
+from axlearn.cloud.aws.vm import _compute_resource, create_vm, delete_vm, get_vm_node
 from axlearn.common.config import REQUIRED, Required, config_class, config_for_function
 
 _SHARED_BASTION_SUFFIX = "shared-bastion"
@@ -145,7 +145,7 @@ def _private_flags(flag_values: flags.FlagValues = FLAGS):
     common_flags(flag_values=flag_values)
     bastion_job_flags(flag_values=flag_values)
     flag_values.set_default("project", aws_settings("project", required=False))
-    flag_values.set_default("region", aws_settings("aws_region", required=False))
+    flag_values.set_default("zone", aws_settings("aws_region", required=False))
 
     flags.DEFINE_string(
         "vm_type", "m7i.24xlarge", "Machine spec to boot for VM.", flag_values=flag_values
@@ -286,7 +286,7 @@ class CreateBastionJob(CPUJob):
         # TODO(markblee): Instead of passing flags manually, consider serializing flags into a
         # flagfile, and reading that.
         run_cmd = docker_command(
-            f"python3 -m axlearn.cloud.gcp.jobs.bastion_vm --name={cfg.name} "
+            f"python3 -m axlearn.cloud.aws.jobs.bastion_vm --name={cfg.name} "
             f"--project={cfg.project} --zone={cfg.zone} start 2>&1 | {output_cmd}",
             image=image,
             volumes={"/var/tmp": "/var/tmp"},
@@ -452,8 +452,8 @@ def main(argv: Sequence[str], *, flag_values: flags.FlagValues = FLAGS):
 
     def quota_file() -> str:
         return os.path.join(
-            "gs://",
-            gcp_settings("private_bucket"),
+            "s3://",
+            aws_settings("private_bucket"),
             flag_values.name,
             QUOTA_CONFIG_PATH,
         )
@@ -473,7 +473,7 @@ def main(argv: Sequence[str], *, flag_values: flags.FlagValues = FLAGS):
                 image=bundler_cfg.image or "base",
                 repo=bundler_cfg.repo or aws_settings("docker_repo", required=False),
                 dockerfile=(
-                    bundler_cfg.dockerfile or gcp_settings("default_dockerfile", required=False)
+                    bundler_cfg.dockerfile or aws_settings("default_dockerfile", required=False)
                 ),
             ),
         )
@@ -555,6 +555,4 @@ def main(argv: Sequence[str], *, flag_values: flags.FlagValues = FLAGS):
 if __name__ == "__main__":
     _private_flags()
     configure_logging(logging.INFO)
-    print("here")
-    exit()
     app.run(main)
