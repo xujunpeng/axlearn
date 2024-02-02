@@ -19,7 +19,7 @@ from axlearn.cloud.common.job import Job
 from axlearn.cloud.common.utils import subprocess_run
 #from axlearn.cloud.gcp.scopes import DEFAULT_TPU_SCOPES
 #from axlearn.cloud.gcp.tpu import _qrm_resource, _tpu_resource, get_queued_tpu_node, get_tpu_node
-from axlearn.cloud.aws.utils import get_credentials, running_from_vm
+from axlearn.cloud.aws.utils import running_from_vm
 from axlearn.common.config import REQUIRED, Required, config_class
 
 
@@ -30,10 +30,10 @@ class AWSJob(Job):
     class Config(Job.Config):
         """Configures AWSJob."""
 
-        # GCP project.
+        # AWS project.
         project: Required[str] = REQUIRED
-        # GCP zone.
-        zone: Required[str] = REQUIRED
+        # AWS region.
+        region: Required[str] = REQUIRED
         # If not none, the current job will be executed as the service account.
         service_account: Optional[str] = None
 

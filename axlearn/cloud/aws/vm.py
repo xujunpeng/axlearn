@@ -9,10 +9,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
 from absl import logging
-from google.auth.credentials import Credentials
-from googleapiclient import discovery, errors
-
 import boto3
+import botocore
 from axlearn.cloud.common.docker import registry_from_repo
 from axlearn.cloud.common.utils import format_table
 from axlearn.cloud.gcp.config import gcp_settings
@@ -35,12 +33,13 @@ class VMDeletionError(RuntimeError):
 def create_vm(
     name: str,
     *,
-    vm_type: str,
-    disk_size: int,
-    credentials: Credentials,
+    region: str,
+    ami_id: str,
+    instance_type: str,
+    key_pair_name: str,
     bundler_type: str,
     metadata: Optional[Dict[str, str]] = None,
-):
+) -> Any:
     """Create VM.
 
     Args:
@@ -57,41 +56,55 @@ def create_vm(
     """
     if not is_valid_resource_name(name):
         raise ValueError(f"{name} is not a valid resource name.")
-    resource = _compute_resource(credentials)
     attempt = 0
     while True:
-        node = get_vm_node(name, resource)
+        node = get_vm_node(name)
         if node is None:  # VM doesn't exist.
             if attempt:
                 # Exponential backoff capped at 512s.
                 backoff_for = 2 ** min(attempt, 9)
                 logging.info(
-                    "Attempt %d to create VM failed, backoff for %ds. "
-                    "Check https://console.cloud.google.com/home/activity?project=%s for errors.",
+                    "Attempt %d to create VM failed, backoff for %ds. ",
                     attempt,
                     backoff_for,
-                    gcp_settings("project"),
+                    aws_settings("project"),
                 )
                 time.sleep(backoff_for)
             try:
-                images = list_disk_images(credentials)
-                if not images:
-                    raise VMCreationError("Could not find valid disk image.")
-                resource.instances().insert(
-                    project=gcp_settings("project"),
-                    zone=gcp_settings("zone"),
-                    body=_vm_config(
-                        name,
-                        vm_type=vm_type,
-                        disk_size=disk_size,
-                        disk_image=images[0],
-                        bundler_type=bundler_type,
-                        metadata=metadata,
-                    ),
-                ).execute()
+                ec2_resource = boto3.resource("ec2", region_name=region)
+                instance = ec2_resource.create_instances(
+                    ImageId=ami_id,
+                    InstanceType=instance_type,
+                    KeyName=key_pair_name,
+                    MinCount=1,
+                    MaxCount=1,
+                )[0]
+                instance.wait_until_running()
+
+                # set instance name:
+                response = ec2_resource.create_tags(
+                    Resources=[instance.id],
+                    Tags=[
+                        {"Key": "Name", "Value": f"{name}"},
+                    ],
+                )
+
                 attempt += 1
-            except (errors.HttpError, Exception) as e:
-                raise VMCreationError("Couldn't create VM") from e
+            except botocore.exceptions.ClientError as err:
+                logging.error(
+                    "Couldn't create instance with image %s, instance type %s, and key %s. "
+                    "Here's why: %s: %s",
+                    ami_id,
+                    instance_type,
+                    key_pair_name,
+                    err.response["Error"]["Code"],
+                    err.response["Error"]["Message"],
+                )
+                raise err
+                # raise VMCreationError("Couldn't create VM") from e
+            else:
+                return instance
+
         else:  # VM exists.
             status = get_vm_node_status(node)
             if status == "BOOTED":
@@ -131,7 +144,7 @@ def get_vm_node_status(node: Dict[str, Any]) -> str:
     return status
 
 
-def delete_vm(name: str, *, credentials: Credentials):
+def delete_vm(name: str):
     """Delete VM.
 
     Args:
@@ -141,8 +154,9 @@ def delete_vm(name: str, *, credentials: Credentials):
     Raises:
         VMDeletionError: If an exeption is raised on the deletion request.
     """
-    resource = _compute_resource(credentials)
-    node = get_vm_node(name, resource)
+    print("delete")
+    exit()
+    node = get_vm_node(name)
     if node is None:  # VM doesn't exist.
         logging.info("VM %s doesn't exist.", name)
         return
@@ -181,149 +195,7 @@ class VmInfo:
     metadata: Dict[str, Any]
 
 
-def list_vm_info(credentials: Credentials) -> List[VmInfo]:
-    """List running VMs for the given project and zone.
-
-    Args:
-        credentials: gcloud credentials used by googleapiclient.discovery.
-
-    Returns:
-        list of up-VMs.
-    """
-    resource = _compute_resource(credentials)
-    result = (
-        resource.instances()
-        .list(project=gcp_settings("project"), zone=gcp_settings("zone"))
-        .execute()
-    )
-    results = []
-    for vm in result.get("items", []):
-        results.append(
-            VmInfo(
-                name=vm["name"],
-                metadata={item["key"]: item["value"] for item in vm["metadata"]["items"]},
-            )
-        )
-    return results
-
-
-def _compute_resource(credentials: Credentials) -> discovery.Resource:
-    """Build gcloud compute v1 API resource.
-
-    Args:
-        credentials: gcloud credentials used by googleapiclient.discovery.
-
-    Returns:
-       discovery.Resource object for the compute v1 API.
-    """
-    return discovery.build("compute", "v1", credentials=credentials, cache_discovery=False)
-
-
-def _vm_config(
-    name: str,
-    *,
-    vm_type: str,
-    disk_size: int,
-    disk_image: str,
-    bundler_type: str,
-    metadata: Optional[Dict[str, str]] = None,
-) -> Dict[str, Any]:
-    """Produce VM config for <name>.
-
-    Args:
-        name: Name of VM.
-        vm_type: VM type.
-        disk_size: Size of disk in GB.
-        disk_image: Name of disk image to load into VM.
-        bundler_type: Type of bundle intended to be loaded to VM.
-        metadata: Optional metadata for the instance.
-
-    Returns:
-        Dictionary describing the VM configuration.
-    """
-    dir_path = pathlib.Path(__file__).parent
-    startup_script_path = dir_path / "scripts" / "start_vm.sh"
-    with open(startup_script_path, "r", encoding="utf8") as of:
-        startup_script_contents = of.read()
-    docker_repo = gcp_settings("docker_repo", required=False)
-    metadata = {
-        "items": [
-            {"key": "bundle_bucket", "value": gcp_settings("ttl_bucket")},
-            {"key": "enable-oslogin", "value": "false"},
-            {"key": "job_name", "value": name},
-            {"key": "startup-script", "value": startup_script_contents},
-            {"key": "zone", "value": gcp_settings("zone")},
-            {
-                "key": "docker_registry",
-                "value": registry_from_repo(docker_repo) if docker_repo else "",
-            },
-            {"key": "bundler_type", "value": bundler_type},
-        ]
-        + [{"key": k, "value": v} for k, v in (metadata or {}).items()]
-    }
-    config = {
-        "canIpForward": False,
-        "confidentialInstanceConfig": {"enableConfidentialCompute": False},
-        "deletionProtection": False,
-        "description": "AXLearn VM",
-        "disks": [
-            {
-                "autoDelete": True,
-                "boot": True,
-                "deviceName": "data",
-                "initializeParams": {
-                    "diskSizeGb": str(disk_size),
-                    "diskType": (
-                        f"projects/{gcp_settings('project')}/zones/{gcp_settings('zone')}/"
-                        "diskTypes/pd-standard"
-                    ),
-                    "labels": {},
-                    "sourceImage": disk_image,
-                },
-                "mode": "READ_WRITE",
-                "type": "PERSISTENT",
-            }
-        ],
-        "displayDevice": {"enableDisplay": False},
-        "guestAccelerators": [],
-        "labels": {},
-        "machineType": (
-            f"projects/{gcp_settings('project')}/zones/{gcp_settings('zone')}/"
-            f"machineTypes/{vm_type}"
-        ),
-        "metadata": metadata,
-        "name": name,
-        "networkInterfaces": [
-            {
-                "subnetwork": gcp_settings("subnetwork"),
-            }
-        ],
-        "reservationAffinity": {"consumeReservationType": "ANY_RESERVATION"},
-        "scheduling": {
-            "automaticRestart": True,
-            "onHostMaintenance": "MIGRATE",
-            "preemptible": False,
-        },
-        "serviceAccounts": [
-            {
-                "email": gcp_settings("service_account_email"),
-                "scopes": ["https://www.googleapis.com/auth/cloud-platform"],
-            }
-        ],
-        "shieldedInstanceConfig": {
-            "enableIntegrityMonitoring": True,
-            "enableSecureBoot": True,
-            "enableVtpm": True,
-        },
-        "tags": {"items": ["allow-internet-egress"]},
-        "zone": f"projects/{gcp_settings('project')}/zones/{gcp_settings('zone')}",
-    }
-    return config
-
-
-
-
-def get_vm_node(name: str, resource: discovery.Resource) -> Optional[Dict[str, Any]]:
+def get_vm_node(name: str) -> Optional[Dict[str, Any]]:
     """Gets information about a VM node.
 
     Args:
@@ -334,63 +206,6 @@ def get_vm_node(name: str, resource: discovery.Resource) -> Optional[Dict[str, A
     """
 
     ec2 = boto3.client("ec2")
-    filters = [{"name": "tag:name", "value": name}]
-    nodes = ec2.describe_instances(Filters = filters)["Reservations"]
+    filters = [{"Name": "tag:name", "Values": [name]}]
+    nodes = ec2.describe_instances(Filters=filters)["Reservations"]
     return None if not nodes else nodes.pop()
-
-
-def list_disk_images(creds: Credentials) -> List[str]:
-    """Lists available disk images in the configured `image_project`.
-
-    Args:
-        creds: Gcloud credentials.
-
-    Returns:
-        The list of images.
-    """
-    resource = _compute_resource(creds)
-    image_project = gcp_settings("image_project")
-    images = (
-        resource.images()
-        .list(
-            project=image_project,
-            orderBy="creationTimestamp desc",
-            maxResults=50,
-        )
-        .execute()
-    )
-    image_names = []
-    for el in images["items"]:
-        if "ubuntu-2004" in el["name"] and "arm" not in el["name"]:
-            image_names.append(el["name"])
-    return [f"projects/{image_project}/global/images/{name}" for name in image_names]
-
-
-def format_vm_info(vms: List[VmInfo], metadata: Optional[Sequence[str]] = None) -> str:
-    """Formats vm information into a table.
-
-    Args:
-        vms: A list of VmInfos, e.g. as returned by `list_vm_info`.
-        metadata: An optional sequence of metadata fields to include in the result. By default,
-            metadata fields are dropped, since the output can become noisy (e.g. with startup
-            scripts).
-
-    Returns:
-        A string produced by `format_table`, which can be printed.
-    """
-    headings = [field.name for field in dataclasses.fields(VmInfo)]
-    if metadata:
-        # Filter requested metadata fields.
-        vms = [
-            dataclasses.replace(vm, metadata={k: vm.metadata.get(k, None) for k in metadata})
-            for vm in vms
-        ]
-    else:
-        headings.remove("metadata")
-    return format_table(
-        headings=headings,
-        rows=[
-            [str(v) for k, v in info.__dict__.items() if k in headings]
-            for info in sorted(vms, key=lambda x: x.name)
-        ],
-    )

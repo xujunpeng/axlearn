@@ -132,8 +132,8 @@ from axlearn.cloud.common.utils import configure_logging, infer_cli_name, parse_
 from axlearn.cloud.aws.config import aws_settings
 from axlearn.cloud.aws.job import CPUJob, docker_command
 from axlearn.cloud.gcp.tpu_cleaner import TPUCleaner
-from axlearn.cloud.aws.utils import catch_auth, common_flags, get_credentials
-from axlearn.cloud.aws.vm import _compute_resource, create_vm, delete_vm, get_vm_node
+from axlearn.cloud.aws.utils import catch_auth, common_flags
+from axlearn.cloud.aws.vm import create_vm, delete_vm, get_vm_node
 from axlearn.common.config import REQUIRED, Required, config_class, config_for_function
 
 _SHARED_BASTION_SUFFIX = "shared-bastion"
@@ -145,12 +145,13 @@ def _private_flags(flag_values: flags.FlagValues = FLAGS):
     common_flags(flag_values=flag_values)
     bastion_job_flags(flag_values=flag_values)
     flag_values.set_default("project", aws_settings("project", required=False))
-    flag_values.set_default("zone", aws_settings("aws_region", required=False))
+    flag_values.set_default("region", aws_settings("aws_region", required=False))
 
-    flags.DEFINE_string(
-        "vm_type", "m7i.24xlarge", "Machine spec to boot for VM.", flag_values=flag_values
-    )
-    flags.DEFINE_integer("disk_size", 1024, "VM disk size in GB.", flag_values=flag_values)
+    # AWS EC2 instance
+    flag_values.set_default("ami_id", aws_settings("ami_id", required=False))
+    flag_values.set_default("instance_type", aws_settings("instance_type", required=False))
+    flag_values.set_default("key_pair_name", aws_settings("key_pair_name", required=False))
+
     flags.DEFINE_integer(
         "max_tries", 1, "Max attempts to run the command.", flag_values=flag_values
     )
@@ -210,8 +211,8 @@ def shared_bastion_name() -> str:
 
 
 def output_dir(bastion: str) -> str:
-    """Directory in gs where jobs are recorded."""
-    return os.path.join("gs://", gcp_settings("permanent_bucket"), bastion)
+    """Directory in s3 where jobs are recorded."""
+    return os.path.join("s3://", aws_settings("permanent_bucket"), bastion)
 
 
 def _gsutil_rsync(
@@ -253,10 +254,10 @@ class CreateBastionJob(CPUJob):
     class Config(CPUJob.Config):
         """Configures CreateBastionJob."""
 
-        # Type of VM.
-        vm_type: Required[str] = REQUIRED
-        # Disk size in GB.
-        disk_size: Required[int] = REQUIRED
+        # Type of VM, including AMI id and instance type
+        ami_id: Required[str] = REQUIRED
+        instance_type: Required[str] = REQUIRED
+        key_pair_name: Required[str] = REQUIRED
 
     @classmethod
     def default_config(cls) -> Config:
@@ -264,17 +265,20 @@ class CreateBastionJob(CPUJob):
 
     def _delete(self):
         cfg = self.config
-        delete_vm(cfg.name, credentials=self._get_job_credentials())
+        print("delete: ", cfg.name)
+
+        #delete_vm(cfg.name, credentials=self._get_job_credentials())
 
     def _execute(self):
         cfg: CreateBastionJob.Config = self.config
         # Create the bastion if it doesn't exist.
         create_vm(
             cfg.name,
-            vm_type=cfg.vm_type,
-            disk_size=cfg.disk_size,
+            region=cfg.region,
+            ami_id=cfg.ami_id,
+            instance_type=cfg.instance_type,
+            key_pair_name=cfg.key_pair_name,
             bundler_type=self._bundler.TYPE,
-            credentials=self._get_job_credentials(),
         )
 
         # Bastion outputs will be piped to run_log.
@@ -283,11 +287,13 @@ class CreateBastionJob(CPUJob):
 
         # Command to start the bastion inside a docker container.
         image = self._bundler.id(cfg.name)
+        print("starting to pull docker image:", image)
+        exit()
         # TODO(markblee): Instead of passing flags manually, consider serializing flags into a
         # flagfile, and reading that.
         run_cmd = docker_command(
             f"python3 -m axlearn.cloud.aws.jobs.bastion_vm --name={cfg.name} "
-            f"--project={cfg.project} --zone={cfg.zone} start 2>&1 | {output_cmd}",
+            f"--project={cfg.project} --zone={cfg.region} start 2>&1 | {output_cmd}",
             image=image,
             volumes={"/var/tmp": "/var/tmp"},
             detached_session=cfg.name,
@@ -306,6 +312,8 @@ class CreateBastionJob(CPUJob):
         # -nx indicates that we acquire an exclusive lock, exiting early if already acquired;
         # -E 0 indicates that early exits still return code 0;
         # -c indicates the command to execute, if we acquire the lock successfully.
+        print(start_cmd)
+        exit()
         self._execute_remote_cmd(
             f"flock -nx -E 0 --verbose /root/start.lock -c {shlex.quote(start_cmd)}",
             detached_session="start_bastion",
@@ -323,7 +331,7 @@ class SubmitBastionJob(BaseSubmitBastionJob):
 
     def _execute(self):
         cfg: SubmitBastionJob.Config = self.config
-        node = get_vm_node(cfg.name, _compute_resource(get_credentials()))
+        node = get_vm_node(cfg.name)
         if node is None or node.get("status", None) != "RUNNING":
             logging.warning(
                 "Bastion %s does not appear to be running yet. "

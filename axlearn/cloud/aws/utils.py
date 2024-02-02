@@ -23,43 +23,10 @@ from axlearn.cloud.gcp.scopes import DEFAULT_APPLICATION
 def common_flags(**kwargs):
     """Defines common AWS flags. Keyword args will be forwarded to flag definitions."""
     flags.DEFINE_string("project", None, "The AWS project name.", **kwargs)
-    flags.DEFINE_string("zone", None, "The AWS region name.", **kwargs)
-
-
-def get_credentials(
-    *,
-    impersonate_account: Optional[str] = None,
-    impersonate_scopes: Optional[Sequence[str]] = None,
-) -> Credentials:
-    """Get aws credentials, or exits if unauthenticated.
-
-    Args:
-        impersonate_account: Service account to impersonate, if not None.
-        impersonate_scopes: Scopes of the impersonation token,
-
-    Returns:
-        An authorized set of credentials.
-    """
-
-    try:
-        # Retrieve AWS credentials
-        session = boto3.Session()
-        credentials = session.get_credentials()
-    except NoCredentialsError:
-        logging.error("Failed to retrieve AWS credentials. Please ensure AWS CLI is properly configured.")
-        exit(1)
-
-    # Optionally, assume a role if impersonate_account is provided
-    if impersonate_account:
-        sts_client = session.client('sts')
-        assumed_role = sts_client.assume_role(
-            RoleArn=impersonate_account,
-            RoleSessionName='AssumedRoleSession',
-            DurationSeconds=3600,  # Adjust as needed
-        )
-        credentials = assumed_role['Credentials']
-
-    return credentials
+    flags.DEFINE_string("region", None, "The AWS region name.", **kwargs)
+    flags.DEFINE_string("ami_id", None, "The EC2 AMI Id", **kwargs)
+    flags.DEFINE_string("instance_type", None, "The EC2 instance type.", **kwargs)
+    flags.DEFINE_string("key_pair_name", None, "The the key pair used to login to EC2 instance.", **kwargs)
 
 
 def running_from_vm() -> bool:
