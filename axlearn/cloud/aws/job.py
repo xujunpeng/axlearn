@@ -145,7 +145,7 @@ class TPUJob(AWSJob):
         """
         cfg = self.config
         from_vm = running_from_vm()
-        cmd = _prepare_cmd_for_gcloud_ssh(f"pushd /root && {cmd}")
+        cmd = _prepare_cmd_for_aws_ssh(f"pushd /root && {cmd}")
         if from_vm:
             self._ensure_ssh_keys()
             extra_ssh_flags = f"--internal-ip {extra_ssh_flags}"
@@ -212,7 +212,7 @@ class CPUJob(AWSJob):
         """
         cfg = self.config
         logging.debug("Executing remote command: '%s'", cmd)
-        cmd = _prepare_cmd_for_gcloud_ssh(f"pushd /root && {cmd}")
+        cmd = _prepare_cmd_for_aws_ssh(f"pushd /root && {cmd}")
         # Use login shell. Note `-i` is not interactive.
         cmd = f"sudo -i bash -c {cmd}"
         if detached_session:
@@ -277,7 +277,7 @@ def _start_ssh_agent():
     logging.info("ssh-agent is running.")
 
 
-def _prepare_cmd_for_gcloud_ssh(cmd: str) -> str:
+def _prepare_cmd_for_aws_ssh(cmd: str) -> str:
     """Handles bash escapes to ensure `cmd` is compatible with gcloud `--command`."""
     cmd = shlex.quote(cmd)
     cmd = cmd.replace('"', '\\"')  # Escape double quotes for --command.
@@ -307,7 +307,7 @@ def docker_command(
     Returns:
         The docker command.
     """
-    cmd = _prepare_cmd_for_gcloud_ssh(f"pushd /root && {cmd}")
+    cmd = _prepare_cmd_for_aws_ssh(f"pushd /root && {cmd}")
     cmd = f"/bin/bash -c {cmd}"
     env = " ".join([f"-e {e}" for e in (env or [])])
     volumes = " ".join([f"-v {src}:{dst}" for src, dst in (volumes or {}).items()])

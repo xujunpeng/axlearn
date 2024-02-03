@@ -37,6 +37,7 @@ def create_vm(
     ami_id: str,
     instance_type: str,
     key_pair_name: str,
+    volume_size: int,
     bundler_type: str,
     metadata: Optional[Dict[str, str]] = None,
 ) -> Any:
@@ -70,25 +71,73 @@ def create_vm(
                     aws_settings("project"),
                 )
                 time.sleep(backoff_for)
+
             try:
+                # create security group first
+                ec2_client = boto3.client("ec2", region_name=region)
+
+                security_groups_name = [
+                    g["GroupName"] for g in ec2_client.describe_security_groups()["SecurityGroups"]
+                ]
+
+                if "axlearn-security-group" in security_groups_name:
+                    security_group = ec2_client.describe_security_groups(
+                        GroupNames=["axlearn-security-group"]
+                    )
+                else:
+                    security_group = ec2_client.create_security_group(
+                        GroupName="axlearn-security-group",
+                        Description="The security group for axlearn",
+                    )
+
+                    ec2_client.authorize_security_group_ingress(
+                        GroupId=security_group["GroupId"],
+                        IpPermissions=[
+                            {
+                                "IpProtocol": "tcp",
+                                "FromPort": 80,
+                                "ToPort": 80,
+                                "IpRanges": [
+                                    {"CidrIp": "0.0.0.0/0"}
+                                ],  # Allow inbound traffic on port 80 from all IP addresses
+                            },
+                            {
+                                "IpProtocol": "tcp",
+                                "FromPort": 22,
+                                "ToPort": 22,
+                                "IpRanges": [
+                                    {"CidrIp": "0.0.0.0/0"}
+                                ],  # Allow SSH access on port 22 from all IP addresses
+                            },
+                        ],
+                    )
+
+                # create ec2 instance
                 ec2_resource = boto3.resource("ec2", region_name=region)
-                instance = ec2_resource.create_instances(
-                    ImageId=ami_id,
-                    InstanceType=instance_type,
-                    KeyName=key_pair_name,
-                    MinCount=1,
-                    MaxCount=1,
-                )[0]
-                instance.wait_until_running()
 
-                # set instance name:
-                response = ec2_resource.create_tags(
-                    Resources=[instance.id],
-                    Tags=[
-                        {"Key": "Name", "Value": f"{name}"},
+                instance_params = {
+                    "ImageId": f"{ami_id}",
+                    "InstanceType": f"{instance_type}",
+                    "KeyName": f"{key_pair_name}",
+                    "SecurityGroupIds": [security_group["GroupId"]],
+                    "MinCount": 1,
+                    "MaxCount": 1,
+                    "BlockDeviceMappings": [
+                        {
+                            "DeviceName": "/dev/sda1",
+                            "Ebs": {
+                                "VolumeSize": volume_size,
+                                "VolumeType": "gp3",
+                            },
+                        }
                     ],
-                )
+                    "TagSpecifications": [
+                        {"ResourceType": "instance", "Tags": [{"Key": "Name", "Value": f"{name}"}]}
+                    ],
+                }
 
+                instance = ec2_resource.create_instances(**instance_params)[0]
+                instance.wait_until_running()
                 attempt += 1
             except botocore.exceptions.ClientError as err:
                 logging.error(
@@ -101,22 +150,15 @@ def create_vm(
                     err.response["Error"]["Message"],
                 )
                 raise err
-                # raise VMCreationError("Couldn't create VM") from e
-            else:
-                return instance
 
         else:  # VM exists.
             status = get_vm_node_status(node)
-            if status == "BOOTED":
-                logging.info("VM %s is running and booted.", name)
-                logging.info("SSH to VM with: %s gcp sshvm %s", infer_cli_name(), name)
-                return
-            elif status == "RUNNING":
+            if status == "running":
                 logging.info(
-                    "VM %s RUNNING, waiting for boot to complete "
-                    "(which usually takes a few minutes)",
+                    "VM %s is RUNNING",
                     name,
                 )
+                return
             else:
                 logging.info("VM %s showing %s, waiting for RUNNING.", name, status)
             time.sleep(10)
@@ -129,19 +171,9 @@ def get_vm_node_status(node: Dict[str, Any]) -> str:
         node: Node as returned by `get_vm_node`.
 
     Returns:
-        The node status. For valid statuses see:
-        https://cloud.google.com/compute/docs/instances/instance-life-cycle
-
-        On top of regular VM statuses, this also returns:
-        * BOOTED: VM is RUNNING + finished booting.
-        * UNKNOWN: VM is missing a status.
+        The node status.
     """
-    status = node.get("status", "UNKNOWN")
-    if status == "RUNNING" and "labels" in node:
-        # Check boot status.
-        if node["labels"].get("boot_status", None) == "done":
-            return "BOOTED"
-    return status
+    return node["Instances"][0]["State"]["Name"]
 
 
 def delete_vm(name: str):
@@ -149,7 +181,6 @@ def delete_vm(name: str):
 
     Args:
         name: Name of VM to delete.
-        credentials: Credentials to use when interacting with GCP.
 
     Raises:
         VMDeletionError: If an exeption is raised on the deletion request.
@@ -206,6 +237,5 @@ def get_vm_node(name: str) -> Optional[Dict[str, Any]]:
     """
 
     ec2 = boto3.client("ec2")
-    filters = [{"Name": "tag:name", "Values": [name]}]
-    nodes = ec2.describe_instances(Filters=filters)["Reservations"]
+    nodes = ec2.describe_instances(Filters=[{"Name": "tag:Name", "Values": [name]}])["Reservations"]
     return None if not nodes else nodes.pop()

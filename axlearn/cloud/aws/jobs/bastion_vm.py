@@ -153,6 +153,9 @@ def _private_flags(flag_values: flags.FlagValues = FLAGS):
     flag_values.set_default("key_pair_name", aws_settings("key_pair_name", required=False))
 
     flags.DEFINE_integer(
+        "volume_size", 1024, "VM disk size in GB", flag_values=flag_values
+    )
+    flags.DEFINE_integer(
         "max_tries", 1, "Max attempts to run the command.", flag_values=flag_values
     )
     flags.DEFINE_integer(
@@ -254,10 +257,11 @@ class CreateBastionJob(CPUJob):
     class Config(CPUJob.Config):
         """Configures CreateBastionJob."""
 
-        # Type of VM, including AMI id and instance type
+        # Type of VM, including AMI id, instance type, and disk size
         ami_id: Required[str] = REQUIRED
         instance_type: Required[str] = REQUIRED
         key_pair_name: Required[str] = REQUIRED
+        volume_size: Required[int] = REQUIRED
 
     @classmethod
     def default_config(cls) -> Config:
@@ -278,6 +282,7 @@ class CreateBastionJob(CPUJob):
             ami_id=cfg.ami_id,
             instance_type=cfg.instance_type,
             key_pair_name=cfg.key_pair_name,
+            volume_size=cfg.volume_size,
             bundler_type=self._bundler.TYPE,
         )
 
@@ -287,8 +292,7 @@ class CreateBastionJob(CPUJob):
 
         # Command to start the bastion inside a docker container.
         image = self._bundler.id(cfg.name)
-        print("starting to pull docker image:", image)
-        exit()
+
         # TODO(markblee): Instead of passing flags manually, consider serializing flags into a
         # flagfile, and reading that.
         run_cmd = docker_command(
