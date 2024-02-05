@@ -27,6 +27,7 @@ def common_flags(**kwargs):
     flags.DEFINE_string("ami_id", None, "The EC2 AMI Id", **kwargs)
     flags.DEFINE_string("instance_type", None, "The EC2 instance type.", **kwargs)
     flags.DEFINE_string("key_pair_name", None, "The the key pair used to login to EC2 instance.", **kwargs)
+    flags.DEFINE_string("iam_role_name", None, "The role with SSM access polity.", **kwargs)
 
 
 def running_from_vm() -> bool:

@@ -196,7 +196,10 @@ class CPUJob(AWSJob):
     Config = AWSJob.Config
 
     def _execute_remote_cmd(
-        self, cmd: str, *, detached_session: Optional[str] = None, **kwargs
+        self, cmd: str,
+        *,
+        vm_id: str,
+        detached_session: Optional[str] = None, **kwargs
     ) -> subprocess.CompletedProcess:
         """Executes a command on an existing VM.
 
@@ -219,10 +222,10 @@ class CPUJob(AWSJob):
             cmd = f"sudo screen -dmS {detached_session} {cmd}"
         # Run via screen to persist command after SSH.
         cmd = (
-            f"gcloud compute -q ssh {cfg.name} "
-            f"--project={cfg.project} "
-            f"--zone={cfg.zone} "
-            f'--command="{cmd}"'
+            f'aws ssm send-command '
+            f'--document-name "AWS-RunShellScript" '
+            f'--targets "Key=instanceids,Values={vm_id}" '
+            f'--parameters "commands={cmd}"'
         )
         proc = subprocess_run(cmd, **_prepare_subprocess_kwargs(kwargs))
         logging.debug("Finished launching: '%s'.", cmd)

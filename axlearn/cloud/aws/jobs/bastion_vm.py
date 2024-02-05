@@ -151,6 +151,7 @@ def _private_flags(flag_values: flags.FlagValues = FLAGS):
     flag_values.set_default("ami_id", aws_settings("ami_id", required=False))
     flag_values.set_default("instance_type", aws_settings("instance_type", required=False))
     flag_values.set_default("key_pair_name", aws_settings("key_pair_name", required=False))
+    flag_values.set_default("iam_role_name", aws_settings("iam_role_name", required=False))
 
     flags.DEFINE_integer(
         "volume_size", 1024, "VM disk size in GB", flag_values=flag_values
@@ -262,6 +263,7 @@ class CreateBastionJob(CPUJob):
         instance_type: Required[str] = REQUIRED
         key_pair_name: Required[str] = REQUIRED
         volume_size: Required[int] = REQUIRED
+        iam_role_name: Required[str] = REQUIRED
 
     @classmethod
     def default_config(cls) -> Config:
@@ -276,15 +278,17 @@ class CreateBastionJob(CPUJob):
     def _execute(self):
         cfg: CreateBastionJob.Config = self.config
         # Create the bastion if it doesn't exist.
-        create_vm(
+        vm_id = create_vm(
             cfg.name,
             region=cfg.region,
             ami_id=cfg.ami_id,
             instance_type=cfg.instance_type,
             key_pair_name=cfg.key_pair_name,
             volume_size=cfg.volume_size,
+            iam_role_name=cfg.iam_role_name,
             bundler_type=self._bundler.TYPE,
         )
+        print(vm_id)
 
         # Bastion outputs will be piped to run_log.
         run_log = os.path.join(output_dir(cfg.name), "logs", f"{cfg.name}-%Y%m%d")
@@ -306,20 +310,23 @@ class CreateBastionJob(CPUJob):
         # idempotent. Setup outputs are piped to setup_log.
         setup_log = os.path.join(_LOG_DIR, "setup.log")
         start_cmd = f"""set -o pipefail;
-            if [[ -z "$(docker ps -f "name={cfg.name}" -f "status=running" -q )" ]]; then
-                {self._bundler.install_command(image)} 2>&1 | tee -a {setup_log} && {run_cmd};
-            else
-                echo "Already started." >> {setup_log};
+            if ! command -v docker &> /dev/null; then
+                sudo snap install docker;
             fi"""
+
+            #if [[ -z "$(docker ps -f "name={cfg.name}" -f "status=running" -q )" ]]; then
+            #    {self._bundler.install_command(image)} 2>&1 | tee -a {setup_log} && {run_cmd};
+            #else
+            #    echo "Already started." >> {setup_log};
+            #fi"""
         # Run the start command on bastion.
         # Acquire a file lock '/root/start.lock' to guard against concurrent starts.
         # -nx indicates that we acquire an exclusive lock, exiting early if already acquired;
         # -E 0 indicates that early exits still return code 0;
         # -c indicates the command to execute, if we acquire the lock successfully.
-        print(start_cmd)
-        exit()
         self._execute_remote_cmd(
             f"flock -nx -E 0 --verbose /root/start.lock -c {shlex.quote(start_cmd)}",
+            vm_id=vm_id,
             detached_session="start_bastion",
             shell=True,
         )

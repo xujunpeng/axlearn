@@ -38,18 +38,23 @@ def create_vm(
     instance_type: str,
     key_pair_name: str,
     volume_size: int,
+    iam_role_name: str,
     bundler_type: str,
     metadata: Optional[Dict[str, str]] = None,
-) -> Any:
+) -> str:
     """Create VM.
 
     Args:
         name: Name of VM.
-        vm_type: What gcloud machine type to boot.
-        disk_size: Size of disk to provision (in GB).
-        credentials: Credentials to use when interacting with GCP.
-        bundler_type: Type of bundle intended to be loaded to VM.
+        region: AWS region
+        ami_id: Type of image intended to be loaded to VM.
+        key_pair_name: The security key pair used for VM (used for SSH)
+        instance_type: What ec2 machine type to boot.
+        volume: Size of disk to provision (in GB).
         metadata: Optional metadata for the instance.
+
+    Return:
+        instance_id
 
     Raises:
         VMCreationError: If an exeption is raised on the creation request.
@@ -60,7 +65,9 @@ def create_vm(
     attempt = 0
     while True:
         node = get_vm_node(name)
-        if node is None:  # VM doesn't exist.
+        if node is None or (
+            node is not None and get_vm_node_status(node) == "terminated"
+        ):  # VM doesn't exist.
             if attempt:
                 # Exponential backoff capped at 512s.
                 backoff_for = 2 ** min(attempt, 9)
@@ -83,7 +90,7 @@ def create_vm(
                 if "axlearn-security-group" in security_groups_name:
                     security_group = ec2_client.describe_security_groups(
                         GroupNames=["axlearn-security-group"]
-                    )
+                    )["SecurityGroups"][0]
                 else:
                     security_group = ec2_client.create_security_group(
                         GroupName="axlearn-security-group",
@@ -113,31 +120,27 @@ def create_vm(
                     )
 
                 # create ec2 instance
-                ec2_resource = boto3.resource("ec2", region_name=region)
+                #ec2_resource = boto3.resource("ec2", region_name=region)
 
-                instance_params = {
-                    "ImageId": f"{ami_id}",
-                    "InstanceType": f"{instance_type}",
-                    "KeyName": f"{key_pair_name}",
-                    "SecurityGroupIds": [security_group["GroupId"]],
-                    "MinCount": 1,
-                    "MaxCount": 1,
-                    "BlockDeviceMappings": [
-                        {
-                            "DeviceName": "/dev/sda1",
-                            "Ebs": {
-                                "VolumeSize": volume_size,
-                                "VolumeType": "gp3",
-                            },
-                        }
-                    ],
-                    "TagSpecifications": [
-                        {"ResourceType": "instance", "Tags": [{"Key": "Name", "Value": f"{name}"}]}
-                    ],
-                }
+                instance_params = _vm_config(
+                    name,
+                    ami_id=ami_id,
+                    instance_type=instance_type,
+                    key_pair_name=key_pair_name,
+                    volume_size=volume_size,
+                    iam_role_name=iam_role_name,
+                    security_group=security_group,
+                )
 
-                instance = ec2_resource.create_instances(**instance_params)[0]
-                instance.wait_until_running()
+                instances = ec2_client.run_instances(**instance_params)
+                instance_id = instances['Instances'][0]['InstanceId']
+
+                #instances = ec2_resource.create_instances(**instance_params)[0]
+                #instances.wait_until_running()
+
+                waiter = ec2_client.get_waiter("instance_status_ok")
+                waiter.wait(InstanceIds=[instance_id])
+
                 attempt += 1
             except botocore.exceptions.ClientError as err:
                 logging.error(
@@ -151,17 +154,32 @@ def create_vm(
                 )
                 raise err
 
+            return instance_id
+
         else:  # VM exists.
             status = get_vm_node_status(node)
+            vm_id = get_vm_node_id(node)
             if status == "running":
                 logging.info(
-                    "VM %s is RUNNING",
+                    "VM %s %s is RUNNING",
                     name,
+                    vm_id,
                 )
-                return
+                return vm_id 
             else:
                 logging.info("VM %s showing %s, waiting for RUNNING.", name, status)
             time.sleep(10)
+
+
+def get_vm_node_id(node: Dict[str, Any]) -> str:
+    """Get the instance id from the given VM node.
+
+    Arg:
+        node: Node as returned by `get_vm_node`.
+    Returns:
+        the instance id
+    """
+    return node["Instances"][0]["InstanceId"]
 
 
 def get_vm_node_status(node: Dict[str, Any]) -> str:
@@ -169,7 +187,6 @@ def get_vm_node_status(node: Dict[str, Any]) -> str:
 
     Args:
         node: Node as returned by `get_vm_node`.
-
     Returns:
         The node status.
     """
@@ -224,6 +241,41 @@ class VmInfo:
 
     name: str
     metadata: Dict[str, Any]
+
+
+def _vm_config(
+    name: str,
+    *,
+    ami_id: str,
+    instance_type: str,
+    key_pair_name: str,
+    volume_size: int,
+    iam_role_name: str,
+    security_group: Dict,
+) -> Dict[str, Any]:
+    instance_params = {
+        "ImageId": f"{ami_id}",
+        "InstanceType": f"{instance_type}",
+        "KeyName": f"{key_pair_name}",
+        "SecurityGroupIds": [security_group["GroupId"]],
+        "MinCount": 1,
+        "MaxCount": 1,
+        "BlockDeviceMappings": [
+            {
+                "DeviceName": "/dev/sda1",
+                "Ebs": {
+                    "VolumeSize": volume_size,
+                    "VolumeType": "gp3",
+                },
+            }
+        ],
+        "TagSpecifications": [
+            {"ResourceType": "instance", "Tags": [{"Key": "Name", "Value": f"{name}"}]}
+        ],
+        "IamInstanceProfile": {"Name": iam_role_name},
+    }
+
+    return instance_params
 
 
 def get_vm_node(name: str) -> Optional[Dict[str, Any]]:
